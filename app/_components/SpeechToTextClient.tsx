@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, FC, useCallback } from 'react'
-import { Mic, Square, Copy, XCircle } from 'lucide-react'
+import { Mic, Square, Copy, XCircle, HelpCircle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Textarea } from '@/components/ui/textarea'
 import { WaveformBar } from './WaveformBar'
@@ -13,6 +13,21 @@ import { Label } from '@/components/ui/label'
 import { reviseTextWithGemini } from '@/lib/geminiService'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+	Drawer,
+	DrawerClose,
+	DrawerContent,
+	DrawerDescription,
+	DrawerFooter,
+	DrawerHeader,
+	DrawerTitle,
+	DrawerTrigger,
+} from "@/components/ui/drawer"
 
 export default function SpeechToTextClient() {
 	const [inputText, setInputText] = useState('')
@@ -38,6 +53,9 @@ export default function SpeechToTextClient() {
 	// Track status notifications to prevent duplicates
 	const hasShownMicReadyToast = useRef(false)
 	const hasShownConnectionReadyToast = useRef(false)
+
+	// State for drawer
+	const [isDrawerOpen, setIsDrawerOpen] = useState(false)
 
 	const handleCopy = useCallback(async () => {
 		if (textareaRef.current?.value) {
@@ -312,8 +330,54 @@ export default function SpeechToTextClient() {
 				<div className="flex items-center justify-center space-x-2 my-4">
 					<Switch id="intent-mode" checked={isIntentModeEnabled} onCheckedChange={setIsIntentModeEnabled} />
 					<Label htmlFor="intent-mode" className="text-sm text-gray-700">
-						Enable Intent Mode (Experimental)
+						Intent Mode
 					</Label>
+					
+					{/* Popover for desktop (hidden on mobile) */}
+					<div className="hidden md:block">
+						<Popover>
+							<PopoverTrigger asChild>
+								<button 
+									className="p-1 text-gray-400 hover:text-gray-600 transition-colors rounded-full focus:outline-none focus:ring-2 focus:ring-gray-300"
+									aria-label="Learn more about Intent Mode"
+								>
+									<HelpCircle size={16} />
+								</button>
+							</PopoverTrigger>
+							<PopoverContent className="w-80 p-4" side="top">
+								<IntentModeHelp />
+							</PopoverContent>
+						</Popover>
+					</div>
+					
+					{/* Drawer for mobile (hidden on desktop) */}
+					<div className="block md:hidden">
+						<Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
+							<DrawerTrigger asChild>
+								<button 
+									className="p-1 text-gray-400 hover:text-gray-600 transition-colors rounded-full focus:outline-none focus:ring-2 focus:ring-gray-300"
+									aria-label="Learn more about Intent Mode"
+								>
+									<HelpCircle size={16} />
+								</button>
+							</DrawerTrigger>
+							<DrawerContent>
+								<DrawerHeader>
+									<DrawerTitle>Intent Mode</DrawerTitle>
+								</DrawerHeader>
+								<div className="px-4 pb-4">
+									<IntentModeHelp />
+								</div>
+								<DrawerFooter>
+									<DrawerClose asChild>
+										<button className="w-full inline-flex items-center justify-center px-4 py-2 rounded-md bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500">
+											Close
+										</button>
+									</DrawerClose>
+								</DrawerFooter>
+							</DrawerContent>
+						</Drawer>
+					</div>
 				</div>
 
 				<div className="relative w-full">
@@ -393,5 +457,38 @@ export default function SpeechToTextClient() {
 				</div>
 			</div>
 		</TooltipProvider>
+	)
+}
+
+// Extracted Intent Mode Help content as a separate component for reuse
+function IntentModeHelp() {
+	return (
+		<div className="space-y-4">
+			<p className="text-xs text-gray-500">
+				Intent Mode uses AI to clean up your speech and revise it based on your intended meaning.
+				It automatically processes your text during pauses in speech.
+			</p>
+			<div className="space-y-2">
+				<h5 className="font-medium text-xs">Examples:</h5>
+				<div className="bg-gray-50 p-2 rounded text-xs">
+					<p className="text-gray-400">You say:</p>
+					<p className="mb-1">Hey Alex, let's meet at 4 pm tomorrow... make that 5 pm day after tomorrow instead.</p>
+					<p className="text-gray-400">Intent Mode revises to:</p>
+					<p className="text-emerald-600">Hey Alex, let's meet at 5 pm the day after tomorrow.</p>
+				</div>
+				<div className="bg-gray-50 p-2 rounded text-xs">
+					<p className="text-gray-400">You say:</p>
+					<p className="mb-1">Remind me to book the dentist. Actually cancel that. Call the vet instead.</p>
+					<p className="text-gray-400">Intent Mode revises to:</p>
+					<p className="text-emerald-600">Call the vet instead.</p>
+				</div>
+				<div className="bg-gray-50 p-2 rounded text-xs">
+					<p className="text-gray-400">You say:</p>
+					<p className="mb-1">Buy eggs, milk, and... wait, remove eggs, just milk and bread.</p>
+					<p className="text-gray-400">Intent Mode revises to:</p>
+					<p className="text-emerald-600">Buy milk and bread.</p>
+				</div>
+			</div>
+		</div>
 	)
 }
