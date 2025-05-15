@@ -282,7 +282,7 @@ export default function SpeechToTextClient() {
 
 	return (
 		<TooltipProvider delayDuration={200}>
-			<div className="w-full max-w-lg space-y-8">
+			<div className="w-full max-w-lg space-y-8 overflow-y-auto max-h-[80vh] pb-10">
 				<div className="flex items-center justify-center space-x-2 my-4">
 					<Switch id="intent-mode" checked={isIntentModeEnabled} onCheckedChange={setIsIntentModeEnabled} />
 					<Label htmlFor="intent-mode" className="text-sm text-gray-700">
@@ -296,7 +296,7 @@ export default function SpeechToTextClient() {
 						value={inputText}
 						onChange={(e) => setInputText(e.target.value)}
 						placeholder="Your text will appear here..."
-						className="min-h-[200px] p-4 text-lg pr-16"
+						className="min-h-[200px] max-h-[50vh] p-4 text-lg pr-16 overflow-y-auto"
 					/>
 					<div className="absolute top-2 right-2 flex space-x-2">
 						{inputText && (

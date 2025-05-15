@@ -9,7 +9,8 @@ const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
 	title: 'Synapse',
-	description: 'Real-time speech-to-text transcriber'
+	description: 'Real-time speech-to-text transcriber',
+	viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
