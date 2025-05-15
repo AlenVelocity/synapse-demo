@@ -2,6 +2,8 @@
 
 Speech to Text with Intent Recognition built with Deepgram and Google Gemini Flash
 
+### Live Demo: [https://stt.alen.is](https://stt.alen.is)
+
 ## Local Setup
 
 ### Prerequisites
@@ -49,7 +51,4 @@ pnpm dev --experimental-https
 ```
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser
-
-## Deployment
-
 
