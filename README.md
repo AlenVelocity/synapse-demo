@@ -8,10 +8,10 @@ Speech to Text with Intent Recognition built with Deepgram and Google Gemini Fla
 
 ### Prerequisites
 
-- Node.js (v18+)
-- pnpm (v9+)
+- Node.js
+- pnpm
 
-## API Keys
+### API Keys
 
 Deepgram: Login to [Deepgram Console](https://console.deepgram.com/) and create an API key with "Member" access.
 
