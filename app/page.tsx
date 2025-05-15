@@ -8,7 +8,7 @@ export default function SpeechToTextPage() {
 				<h1 className="text-2xl font-semibold text-center text-gray-800">Synapse</h1>
 				<SpeechToTextClient />
 				<div className="text-center text-sm text-gray-500 mt-8">
-					Press and hold <kbd className="px-2 py-1 bg-gray-100 rounded">Space</kbd> to record
+					Press and hold <kbd className="px-2 py-1 bg-gray-100 rounded">Space</kbd> to transcribe
 				</div>
 			</div>
 			<a
