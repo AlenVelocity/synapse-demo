@@ -1,99 +1,180 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, FC, useCallback } from "react"
 import { Mic, Square } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Textarea } from "@/components/ui/textarea"
-import { WaveformBar } from "./components/WaveformBar"
+import { WaveformBar } from "./_components/WaveformBar"
+import {
+  LiveTranscriptionEvent,
+  LiveTranscriptionEvents,
+  useDeepgram,
+} from "@/context/DeepgramContextProvider"
+import {
+  MicrophoneEvents,
+  MicrophoneState,
+  useMicrophone,
+} from "@/context/MicrophoneContextProvider"
+import { SOCKET_STATES } from "@deepgram/sdk"
 
 export default function SpeechToText() {
   const [inputText, setInputText] = useState("")
   const [isListening, setIsListening] = useState(false)
-  const [transcript, setTranscript] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const recognitionRef = useRef<any>(null)
 
-  // Initialize speech recognition
+  // Deepgram specific state and refs
+  const [caption, setCaption] = useState<string | undefined>("Powered by Deepgram")
+  const { connection, connectToDeepgram, connectionState } = useDeepgram()
+  const { setupMicrophone, microphone, startMicrophone, microphoneState, stopMicrophone } = useMicrophone()
+  const captionTimeout = useRef<NodeJS.Timeout | null>(null)
+  const keepAliveInterval = useRef<NodeJS.Timeout | null>(null)
+
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    setupMicrophone();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      if (SpeechRecognition) {
-        recognitionRef.current = new SpeechRecognition()
-        recognitionRef.current.continuous = true
-        recognitionRef.current.interimResults = true
+  useEffect(() => {
+    if (microphoneState === MicrophoneState.Ready) {
+      connectToDeepgram({
+        model: "nova-3",
+        interim_results: true,
+        smart_format: true,
+        filler_words: true,
+        utterance_end_ms: 3000,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [microphoneState]); // Dependency: connectToDeepgram missing, will add if linter complains or if it's part of a useCallback
 
-        recognitionRef.current.onresult = (event: any) => {
-          const current = event.resultIndex
-          const transcriptText = event.results[current][0].transcript
-          setTranscript(transcriptText)
+  useEffect(() => {
+    if (!microphone || !connection) return;
 
-          // Update input text directly with the transcription
-          if (event.results[current].isFinal) {
-            setInputText((prev) => {
-              return prev ? `${prev} ${transcriptText}` : transcriptText
-            })
+    const onData = (e: BlobEvent) => {
+      if (e.data.size > 0) {
+        connection?.send(e.data);
+      }
+    };
+
+    const onTranscript = (data: LiveTranscriptionEvent) => {
+      const { is_final: isFinal, speech_final: speechFinal } = data;
+      let thisCaption = data.channel.alternatives[0].transcript;
+
+      if (thisCaption !== "") {
+        setCaption(thisCaption);
+      }
+
+      if (isFinal && speechFinal) {
+        setInputText((prev) => prev ? `${prev} ${thisCaption}`.trim() : thisCaption);
+        if (captionTimeout.current) {
+          clearTimeout(captionTimeout.current);
+        }
+        captionTimeout.current = setTimeout(() => {
+          setCaption(undefined); // Or some placeholder like "Powered by Deepgram"
+          if (captionTimeout.current) {
+            clearTimeout(captionTimeout.current);
           }
-        }
+        }, 3000);
+      }
+    };
 
-        recognitionRef.current.onerror = (event: any) => {
-          console.error("Speech recognition error", event.error)
-          stopListening()
-        }
+    if (connectionState === SOCKET_STATES.open) {
+      connection.addListener(LiveTranscriptionEvents.Transcript, onTranscript);
+      microphone.addEventListener(MicrophoneEvents.DataAvailable, onData);
+      // startMicrophone(); // Moved to startListening function
+    } else {
+      // Ensure microphone is stopped if connection is not open
+      if(microphoneState === MicrophoneState.Open) {
+        stopMicrophone();
       }
     }
 
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop()
+      if (connection) {
+        connection.removeListener(LiveTranscriptionEvents.Transcript, onTranscript);
+      }
+      if (microphone) {
+        microphone.removeEventListener(MicrophoneEvents.DataAvailable, onData);
+      }
+      if (captionTimeout.current) {
+        clearTimeout(captionTimeout.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionState, microphone, connection, setInputText, stopMicrophone, microphoneState]);
+
+  useEffect(() => {
+    if (!connection) return;
+
+    if (
+      microphoneState === MicrophoneState.Open && // check Open instead of Not Open
+      connectionState === SOCKET_STATES.open
+    ) {
+      // connection.keepAlive(); // Initial keepAlive is sent by SDK on open, or can be sent if needed
+      if (keepAliveInterval.current) clearInterval(keepAliveInterval.current); // Clear previous before setting new
+      keepAliveInterval.current = setInterval(() => {
+        connection.keepAlive();
+      }, 10000);
+    } else {
+      if (keepAliveInterval.current) {
+        clearInterval(keepAliveInterval.current);
       }
     }
-  }, [])
+
+    return () => {
+      if (keepAliveInterval.current) {
+        clearInterval(keepAliveInterval.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [microphoneState, connectionState, connection]);
+
+  // Sync isListening state with Deepgram's microphoneState
+  useEffect(() => {
+    setIsListening(microphoneState === MicrophoneState.Open);
+  }, [microphoneState, setIsListening]);
+
+  const startListening = useCallback(() => {
+    if (microphoneState !== MicrophoneState.Open) {
+      startMicrophone();
+    }
+  }, [microphoneState, startMicrophone]);
+
+  const stopListening = useCallback(() => {
+    if (microphoneState === MicrophoneState.Open) {
+      stopMicrophone();
+    }
+    if (captionTimeout.current) {
+      clearTimeout(captionTimeout.current);
+    }
+    // Reset caption immediately or after a short delay if preferred
+    // setCaption("Powered by Deepgram"); 
+  }, [microphoneState, stopMicrophone]);
 
   // Handle spacebar press/release
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" && !isListening && !e.repeat && document.activeElement !== textareaRef.current) {
-        e.preventDefault()
-        startListening()
+        e.preventDefault();
+        startListening();
       }
-    }
+    };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space" && isListening) {
-        e.preventDefault()
-        stopListening()
+        e.preventDefault();
+        stopListening();
       }
-    }
+    };
 
-    window.addEventListener("keydown", handleKeyDown)
-    window.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown)
-      window.removeEventListener("keyup", handleKeyUp)
-    }
-  }, [isListening])
-
-  const startListening = () => {
-    setTranscript("")
-    setIsListening(true)
-
-    if (recognitionRef.current) {
-      recognitionRef.current.start()
-    }
-  }
-
-  const stopListening = () => {
-    setIsListening(false)
-
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-    }
-
-    // Clear the transcript after stopping
-    setTranscript("")
-  }
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [isListening, startListening, stopListening]); // Added startListening and stopListening as dependencies
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
@@ -129,7 +210,7 @@ export default function SpeechToText() {
                   </div>
                 </div>
                 <div className="absolute w-full text-xs text-center text-gray-600 -bottom-6">
-                  {transcript ? transcript : "Listening..."}
+                  {caption ? caption : (isListening ? "Listening..." : "Powered by Deepgram")}
                 </div>
               </motion.div>
             ) : (
