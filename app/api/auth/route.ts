@@ -15,14 +15,17 @@ export async function GET(request: NextRequest) {
   const url = request.url;
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY ?? "");
 
-  let { result: projectsResult, error: projectsError } =
-    await deepgram.manage.getProject()
 
-  if (projectsError) {
-    return NextResponse.json(projectsError);
+  const {
+    result: project,
+    error: projectError,
+  } = await deepgram.manage.getProject(process.env.DEEPGRAM_PROJECT_ID ?? "")
+
+  console.log(project, projectError);
+
+  if (projectError) {
+    return NextResponse.json(projectError);
   }
-
-  const project = projectsResult?.projects[0];
 
   if (!project) {
     return NextResponse.json(

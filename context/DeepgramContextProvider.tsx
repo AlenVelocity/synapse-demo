@@ -16,6 +16,8 @@ import {
   useState,
   ReactNode,
   FunctionComponent,
+  useCallback,
+  useMemo,
 } from "react";
 
 interface DeepgramContextType {
@@ -47,45 +49,50 @@ const DeepgramContextProvider: FunctionComponent<
     SOCKET_STATES.closed
   );
 
-  /**
-   * Connects to the Deepgram speech recognition service and sets up a live transcription session.
-   *
-   * @param options - The configuration options for the live transcription session.
-   * @param endpoint - The optional endpoint URL for the Deepgram service.
-   * @returns A Promise that resolves when the connection is established.
-   */
-  const connectToDeepgram = async (options: LiveSchema, endpoint?: string) => {
+  const connectToDeepgram = useCallback(async (options: LiveSchema, endpoint?: string) => {
+    console.log("[DeepgramContext] connectToDeepgram called with options:", options);
     const key = await getApiKey();
     const deepgram = createClient(key);
 
     const conn = deepgram.listen.live(options, endpoint);
 
     conn.addListener(LiveTranscriptionEvents.Open, () => {
+      console.log("[DeepgramContext] Connection opened");
       setConnectionState(SOCKET_STATES.open);
     });
 
     conn.addListener(LiveTranscriptionEvents.Close, () => {
+      console.log("[DeepgramContext] Connection closed");
       setConnectionState(SOCKET_STATES.closed);
+      setConnection(null);
     });
 
+    conn.addListener(LiveTranscriptionEvents.Error, (error) => {
+      console.error("[DeepgramContext] Connection error:", error);
+      setConnectionState(SOCKET_STATES.closed);
+      setConnection(null);
+    });
+    
     setConnection(conn);
-  };
+  }, [setConnection, setConnectionState]);
 
-  const disconnectFromDeepgram = async () => {
+  const disconnectFromDeepgram = useCallback(async () => {
+    console.log("[DeepgramContext] disconnectFromDeepgram called");
     if (connection) {
       connection.requestClose();
-      setConnection(null);
     }
-  };
+  }, [connection]);
+
+  const contextValue = useMemo(() => ({
+    connection,
+    connectToDeepgram,
+    disconnectFromDeepgram,
+    connectionState,
+  }), [connection, connectToDeepgram, disconnectFromDeepgram, connectionState]);
 
   return (
     <DeepgramContext.Provider
-      value={{
-        connection,
-        connectToDeepgram,
-        disconnectFromDeepgram,
-        connectionState,
-      }}
+      value={contextValue}
     >
       {children}
     </DeepgramContext.Provider>

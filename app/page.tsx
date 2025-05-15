@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, FC, useCallback } from "react"
-import { Mic, Square } from "lucide-react"
+import { Mic, Square, Copy, XCircle } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Textarea } from "@/components/ui/textarea"
 import { WaveformBar } from "./_components/WaveformBar"
@@ -16,18 +16,55 @@ import {
   useMicrophone,
 } from "@/context/MicrophoneContextProvider"
 import { SOCKET_STATES } from "@deepgram/sdk"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { reviseTextWithGemini } from "@/lib/geminiService"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 export default function SpeechToText() {
   const [inputText, setInputText] = useState("")
-  const [isListening, setIsListening] = useState(false)
+  const [caption, setCaption] = useState<string | undefined>("Powered by Deepgram")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Deepgram specific state and refs
-  const [caption, setCaption] = useState<string | undefined>("Powered by Deepgram")
   const { connection, connectToDeepgram, connectionState } = useDeepgram()
   const { setupMicrophone, microphone, startMicrophone, microphoneState, stopMicrophone } = useMicrophone()
+
   const captionTimeout = useRef<NodeJS.Timeout | null>(null)
   const keepAliveInterval = useRef<NodeJS.Timeout | null>(null)
+
+  // Intent Mode specific state and refs
+  const [isIntentModeEnabled, setIsIntentModeEnabled] = useState(false)
+  const intentModePauseTimer = useRef<NodeJS.Timeout | null>(null)
+  const PAUSE_DURATION_MS = 1000; // Configurable pause duration for intent processing
+
+  // Counts how many times connectToDeepgram effect runs
+  const connectEffectCount = useRef(0);
+
+  const [showCopiedTooltip, setShowCopiedTooltip] = useState(false); // State for "Copied!" tooltip
+
+  // Function to copy text to clipboard
+  const handleCopy = useCallback(async () => {
+    if (textareaRef.current?.value) {
+      try {
+        await navigator.clipboard.writeText(textareaRef.current.value);
+        console.log("Text copied to clipboard!");
+        setShowCopiedTooltip(true);
+        setTimeout(() => setShowCopiedTooltip(false), 1500); // Hide tooltip after 1.5s
+      } catch (err) {
+        console.error("Failed to copy text: ", err);
+        alert("Failed to copy text."); // Keep alert for error for now
+      }
+    }
+  }, [textareaRef]);
+
+  // Function to clear the input text
+  const handleClear = useCallback(() => {
+    setInputText("");
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+    console.log("Text cleared!");
+  }, [setInputText, textareaRef]);
 
   useEffect(() => {
     setupMicrophone();
@@ -35,57 +72,114 @@ export default function SpeechToText() {
   }, []);
 
   useEffect(() => {
+    connectEffectCount.current += 1;
+    console.log(`[useEffect connectToDeepgram] Running - Count: ${connectEffectCount.current}, Microphone State: ${microphoneState}`);
+
     if (microphoneState === MicrophoneState.Ready) {
+      console.log("[useEffect connectToDeepgram] Condition met: Microphone ready. Calling connectToDeepgram.");
       connectToDeepgram({
-        model: "nova-3",
+        model: "nova-3", // Example model, adjust as needed
         interim_results: true,
         smart_format: true,
         filler_words: true,
-        utterance_end_ms: 3000,
+        utterance_end_ms: 3000, // Or adjust as per your needs
       });
+    } else {
+      console.log("[useEffect connectToDeepgram] Condition NOT met: Microphone not ready. State: ", microphoneState);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [microphoneState]); // Dependency: connectToDeepgram missing, will add if linter complains or if it's part of a useCallback
+  }, [microphoneState, connectToDeepgram]); // Added connectToDeepgram
+
+  const handleIntentProcessing = useCallback(async () => {
+    if (!isIntentModeEnabled || !textareaRef.current) return;
+
+    const currentTextInBox = textareaRef.current.value;
+    if (currentTextInBox && currentTextInBox.trim()) {
+      console.log("Intent Mode: Pause detected. Text for Gemini revision:", currentTextInBox);
+      const revisedText = await reviseTextWithGemini(currentTextInBox);
+
+      // Only update if Gemini made a change AND the text in the box hasn't changed 
+      // (i.e., user didn't start speaking again while Gemini was processing)
+      if (textareaRef.current?.value === currentTextInBox) {
+        if (revisedText !== currentTextInBox) {
+          setInputText(revisedText);
+          console.log("Intent Mode: InputText updated by Gemini:", revisedText);
+        }
+      } else {
+        console.log("Intent Mode: Gemini revision skipped as text input changed during processing.");
+      }
+    }
+  }, [isIntentModeEnabled, textareaRef, setInputText]);
+
+  const onTranscript = useCallback((data: LiveTranscriptionEvent) => {
+    // console.log("Deepgram onTranscript event received:", JSON.stringify(data, null, 2));
+
+    const { is_final: isFinal, speech_final: speechFinal } = data;
+    let thisCaption = "";
+    // Safely access transcript
+    if (data.channel && data.channel.alternatives && data.channel.alternatives.length > 0 && data.channel.alternatives[0].transcript) {
+      thisCaption = data.channel.alternatives[0].transcript;
+    } else {
+      // It's possible to receive events with no transcript (e.g. metadata, or empty final utterance)
+      // console.warn("No transcript in Deepgram event or event is not structured as expected:", data);
+    }
+
+    console.log(`[onTranscript] Event: isFinal=${isFinal}, speechFinal=${speechFinal}, captionText="${thisCaption}"`);
+
+    // Update caption with interim and final results if there's text
+    if (thisCaption) { 
+      setCaption(thisCaption);
+      // console.log(`[onTranscript] Caption updated to: "${thisCaption}"`);
+    }
+
+    // Update main input text with FINAL, NON-EMPTY transcripts
+    if (isFinal && thisCaption.trim() !== "") { // Only append if the final transcript is not just whitespace
+      console.log(`[onTranscript] Met condition to update inputText: isFinal=${isFinal}, thisCaption="${thisCaption}"`);
+      setInputText((prev) => {
+        const newText = prev ? `${prev} ${thisCaption.trim()}`.trim() : thisCaption.trim();
+        console.log(`[onTranscript] setInputText: prev="${prev}", newText="${newText}"`);
+        return newText;
+      });
+
+      if (isIntentModeEnabled) {
+        console.log("[onTranscript] Intent Mode ON: Setting/resetting pause timer.");
+        if (intentModePauseTimer.current) {
+          clearTimeout(intentModePauseTimer.current);
+        }
+        intentModePauseTimer.current = setTimeout(handleIntentProcessing, PAUSE_DURATION_MS);
+      }
+    } else if (isFinal) {
+      console.log(`[onTranscript] Skipped setInputText: isFinal=true, but thisCaption is empty or whitespace. Caption: "${thisCaption}"`);
+    } else {
+      // console.log(`[onTranscript] Skipped setInputText: isFinal=false. Caption: "${thisCaption}"`);
+    }
+
+    // Handle end of speech for caption clearing
+    if (isFinal && speechFinal) {
+      console.log("[onTranscript] Met condition for caption timeout: isFinal=true, speechFinal=true.");
+      if (captionTimeout.current) clearTimeout(captionTimeout.current);
+      captionTimeout.current = setTimeout(() => {
+        console.log("[onTranscript] Caption timeout: Clearing caption.");
+        setCaption(undefined); // Or "Powered by Deepgram"
+        if (captionTimeout.current) clearTimeout(captionTimeout.current);
+      }, 3000); 
+    }
+  }, [isIntentModeEnabled, setInputText, setCaption, handleIntentProcessing, captionTimeout, intentModePauseTimer, PAUSE_DURATION_MS]);
 
   useEffect(() => {
     if (!microphone || !connection) return;
 
     const onData = (e: BlobEvent) => {
-      if (e.data.size > 0) {
+      if (e.data.size > 0 && connectionState === SOCKET_STATES.open) {
         connection?.send(e.data);
       }
     };
-
-    const onTranscript = (data: LiveTranscriptionEvent) => {
-      const { is_final: isFinal, speech_final: speechFinal } = data;
-      let thisCaption = data.channel.alternatives[0].transcript;
-
-      if (thisCaption !== "") {
-        setCaption(thisCaption);
-      }
-
-      if (isFinal && speechFinal) {
-        setInputText((prev) => prev ? `${prev} ${thisCaption}`.trim() : thisCaption);
-        if (captionTimeout.current) {
-          clearTimeout(captionTimeout.current);
-        }
-        captionTimeout.current = setTimeout(() => {
-          setCaption(undefined); // Or some placeholder like "Powered by Deepgram"
-          if (captionTimeout.current) {
-            clearTimeout(captionTimeout.current);
-          }
-        }, 3000);
-      }
-    };
-
+    
     if (connectionState === SOCKET_STATES.open) {
       connection.addListener(LiveTranscriptionEvents.Transcript, onTranscript);
       microphone.addEventListener(MicrophoneEvents.DataAvailable, onData);
-      // startMicrophone(); // Moved to startListening function
     } else {
-      // Ensure microphone is stopped if connection is not open
       if(microphoneState === MicrophoneState.Open) {
-        stopMicrophone();
       }
     }
 
@@ -99,19 +193,20 @@ export default function SpeechToText() {
       if (captionTimeout.current) {
         clearTimeout(captionTimeout.current);
       }
+      if (intentModePauseTimer.current) {
+        clearTimeout(intentModePauseTimer.current);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionState, microphone, connection, setInputText, stopMicrophone, microphoneState]);
+  }, [connectionState, microphone, connection, onTranscript, microphoneState, stopMicrophone]);
 
   useEffect(() => {
     if (!connection) return;
 
     if (
-      microphoneState === MicrophoneState.Open && // check Open instead of Not Open
+      microphoneState === MicrophoneState.Open &&
       connectionState === SOCKET_STATES.open
     ) {
-      // connection.keepAlive(); // Initial keepAlive is sent by SDK on open, or can be sent if needed
-      if (keepAliveInterval.current) clearInterval(keepAliveInterval.current); // Clear previous before setting new
+      if (keepAliveInterval.current) clearInterval(keepAliveInterval.current);
       keepAliveInterval.current = setInterval(() => {
         connection.keepAlive();
       }, 10000);
@@ -126,16 +221,19 @@ export default function SpeechToText() {
         clearInterval(keepAliveInterval.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [microphoneState, connectionState, connection]);
 
-  // Sync isListening state with Deepgram's microphoneState
   useEffect(() => {
-    setIsListening(microphoneState === MicrophoneState.Open);
-  }, [microphoneState, setIsListening]);
+    if (!isIntentModeEnabled && intentModePauseTimer.current) {
+      clearTimeout(intentModePauseTimer.current);
+      console.log("Intent Mode disabled, cleared pending revision timer.");
+    }
+  }, [isIntentModeEnabled, intentModePauseTimer]);
+  
+  const isListening = microphoneState === MicrophoneState.Open;
 
   const startListening = useCallback(() => {
-    if (microphoneState !== MicrophoneState.Open) {
+    if (microphoneState !== MicrophoneState.Open && microphoneState !== MicrophoneState.Opening) {
       startMicrophone();
     }
   }, [microphoneState, startMicrophone]);
@@ -143,15 +241,12 @@ export default function SpeechToText() {
   const stopListening = useCallback(() => {
     if (microphoneState === MicrophoneState.Open) {
       stopMicrophone();
+      if (intentModePauseTimer.current) {
+        clearTimeout(intentModePauseTimer.current);
+      }
     }
-    if (captionTimeout.current) {
-      clearTimeout(captionTimeout.current);
-    }
-    // Reset caption immediately or after a short delay if preferred
-    // setCaption("Powered by Deepgram"); 
-  }, [microphoneState, stopMicrophone]);
+  }, [microphoneState, stopMicrophone, intentModePauseTimer]);
 
-  // Handle spacebar press/release
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" && !isListening && !e.repeat && document.activeElement !== textareaRef.current) {
@@ -174,86 +269,109 @@ export default function SpeechToText() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [isListening, startListening, stopListening]); // Added startListening and stopListening as dependencies
+  }, [isListening, startListening, stopListening]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
-      <div className="w-full max-w-lg space-y-8">
-        <h1 className="text-2xl font-semibold text-center text-gray-800">Speech to Text</h1>
+    <TooltipProvider delayDuration={200}>
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
+        <div className="w-full max-w-lg space-y-8">
+          <h1 className="text-2xl font-semibold text-center text-gray-800">Speech to Text</h1>
 
-        {/* Main text input */}
-        <Textarea
-          ref={textareaRef}
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="Your text will appear here..."
-          className="min-h-[200px] p-4 text-lg"
-        />
+          {/* Intent Mode Toggle */}
+          <div className="flex items-center justify-center space-x-2 my-4">
+            <Switch
+              id="intent-mode"
+              checked={isIntentModeEnabled}
+              onCheckedChange={setIsIntentModeEnabled}
+            />
+            <Label htmlFor="intent-mode" className="text-sm text-gray-700">
+              Enable Intent Mode (Experimental)
+            </Label>
+          </div>
 
-        {/* Microphone button and expanded state */}
-        <div className="relative flex justify-center">
-          <AnimatePresence>
-            {isListening ? (
-              <motion.div
-                initial={{ width: "48px", borderRadius: "24px" }}
-                animate={{ width: "240px", borderRadius: "24px" }}
-                exit={{ width: "48px", borderRadius: "24px" }}
-                className="relative flex items-center justify-center h-12 bg-white border shadow-md cursor-pointer"
-                onClick={stopListening}
-              >
-                <div className="flex items-center justify-between w-full px-4">
-                  <Square className="w-5 h-5 text-red-500" />
-                  <div className="flex items-center space-x-1">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <WaveformBar key={i} isListening={isListening} delay={i * 0.1} />
-                    ))}
+          {/* Main text input wrapper for buttons */}
+          <div className="relative w-full">
+            <Textarea
+              ref={textareaRef}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Your text will appear here..."
+              className="min-h-[200px] p-4 text-lg pr-16"
+            />
+            <div className="absolute top-2 right-2 flex space-x-2">
+              {inputText && (
+                <>
+                  <Tooltip open={showCopiedTooltip}>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={handleCopy}
+                        title="Copy text"
+                        className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
+                        aria-label="Copy text to clipboard"
+                      >
+                        <Copy size={18} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Copied!</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  <button
+                    onClick={handleClear}
+                    title="Clear text"
+                    className="p-2 text-gray-500 hover:text-red-500 transition-colors"
+                    aria-label="Clear text input"
+                  >
+                    <XCircle size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Microphone button and expanded state */}
+          <div className="relative flex justify-center">
+            <AnimatePresence>
+              {isListening ? (
+                <motion.div
+                  initial={{ width: "48px", borderRadius: "24px" }}
+                  animate={{ width: "240px", borderRadius: "24px" }}
+                  exit={{ width: "48px", borderRadius: "24px" }}
+                  className="relative flex items-center justify-center h-12 bg-white border shadow-md cursor-pointer"
+                  onClick={stopListening}
+                >
+                  <div className="flex items-center justify-between w-full px-4">
+                    <Square className="w-5 h-5 text-red-500" />
+                    <div className="flex items-center space-x-1">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <WaveformBar key={i} isListening={isListening} delay={i * 0.1} />
+                      ))}
+                    </div>
                   </div>
-                </div>
-                <div className="absolute w-full text-xs text-center text-gray-600 -bottom-6">
-                  {caption ? caption : (isListening ? "Listening..." : "Powered by Deepgram")}
-                </div>
-              </motion.div>
-            ) : (
-              <motion.button
-                initial={{ scale: 0.9 }}
-                animate={{ scale: 1 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={startListening}
-                className="flex items-center justify-center w-12 h-12 bg-white rounded-full shadow-md"
-              >
-                <Mic className="w-5 h-5 text-gray-600" />
-              </motion.button>
-            )}
-          </AnimatePresence>
-        </div>
+                  <div className="absolute w-full text-xs text-center text-gray-600 -bottom-6">
+                    {caption ? caption : (isListening ? "Listening..." : "Powered by Deepgram")}
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.button
+                  initial={{ scale: 0.9 }}
+                  animate={{ scale: 1 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={startListening}
+                  className="flex items-center justify-center w-12 h-12 bg-white rounded-full shadow-md"
+                >
+                  <Mic className="w-5 h-5 text-gray-600" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
 
-        <div className="text-center text-sm text-gray-500 mt-8">
-          Press and hold <kbd className="px-2 py-1 bg-gray-100 rounded">Space</kbd> to record
+          <div className="text-center text-sm text-gray-500 mt-8">
+            Press and hold <kbd className="px-2 py-1 bg-gray-100 rounded">Space</kbd> to record
+          </div>
         </div>
       </div>
-    </div>
+    </TooltipProvider>
   )
 }
-
-// Waveform animation component
-// function WaveformBar({ isListening, delay }: { isListening: boolean; delay: number }) {
-// return (
-// <motion.div
-// initial={{ height: "10px" }}
-// animate={
-// isListening
-// ? {
-// height: ["10px", "20px", "10px", "15px", "10px"],
-// transition: {
-// duration: 1,
-// repeat: Number.POSITIVE_INFINITY,
-// delay: delay,
-// },
-// }
-// : { height: "10px" }
-// }
-// className="w-1 bg-red-500 rounded-full"
-// />
-// )
-// }
