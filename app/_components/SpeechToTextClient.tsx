@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { reviseTextWithGemini } from '@/lib/geminiService'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { toast } from 'sonner'
 
 export default function SpeechToTextClient() {
 	const [inputText, setInputText] = useState('')
@@ -33,6 +34,10 @@ export default function SpeechToTextClient() {
 	const connectEffectCount = useRef(0)
 
 	const [showCopiedTooltip, setShowCopiedTooltip] = useState(false)
+	
+	// Track status notifications to prevent duplicates
+	const hasShownMicReadyToast = useRef(false)
+	const hasShownConnectionReadyToast = useRef(false)
 
 	const handleCopy = useCallback(async () => {
 		if (textareaRef.current?.value) {
@@ -59,6 +64,27 @@ export default function SpeechToTextClient() {
 	useEffect(() => {
 		setupMicrophone()
 	}, [])
+
+	// Monitor microphone state and show toast when ready
+	useEffect(() => {
+		if (microphoneState === MicrophoneState.Ready && !hasShownMicReadyToast.current) {
+			toast.success('Microphone is ready', {
+				duration: 3000,
+			})
+			hasShownMicReadyToast.current = true
+		}
+	}, [microphoneState])
+
+	// Monitor Deepgram connection state and show toast when ready
+	useEffect(() => {
+		if (connectionState === SOCKET_STATES.open && !hasShownConnectionReadyToast.current) {
+			// toast.success('Deepgram is connected', {
+			// 	description: 'You can now start recording',
+			// 	duration: 3000,
+			// })
+			// hasShownConnectionReadyToast.current = true
+		}
+	}, [connectionState])
 
 	useEffect(() => {
 		connectEffectCount.current += 1

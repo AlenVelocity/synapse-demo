@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google'
 import { ThemeProvider } from '@/components/theme-provider'
 import { DeepgramContextProvider } from '@/context/DeepgramContextProvider'
 import { MicrophoneContextProvider } from '@/context/MicrophoneContextProvider'
+import { Toaster } from '@/components/ui/sonner'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 						<DeepgramContextProvider>{children}</DeepgramContextProvider>
 					</MicrophoneContextProvider>
 				</ThemeProvider>
+				<Toaster position="bottom-center" />
 			</body>
 		</html>
 	)
