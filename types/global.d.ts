@@ -1,4 +1,4 @@
 interface Window {
-  SpeechRecognition?: typeof SpeechRecognition
-  webkitSpeechRecognition?: typeof SpeechRecognition
+	SpeechRecognition?: typeof SpeechRecognition
+	webkitSpeechRecognition?: typeof SpeechRecognition
 }
