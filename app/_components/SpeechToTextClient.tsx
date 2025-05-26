@@ -60,28 +60,77 @@ const PRESET_MODES: Mode[] = [
 		id: 'note-taking', 
 		title: 'Note-taking', 
 		emoji: '📝', 
-		prompt: 'Clean up this text for note-taking. Remove filler words, fix grammar, and organize thoughts clearly.',
+		prompt: `Clean up this text for note-taking. Remove filler words, fix grammar, and organize thoughts clearly.
+
+Example Raw Speech:
+"Ok so for the project timeline we need to um finish the design phase by next week - no actually make that end of month, and then development starts in... I think February? No wait March is better because of team availability. And we should probably add an extra sprint for QA testing... yeah definitely need that extra time for testing."
+
+Example Output:
+Project Timeline:
+- Design phase completion: End of month
+- Development start: March (aligned with team availability) 
+- Added: Extra sprint for QA testing`,
 		isCustom: false
 	},
 	{ 
 		id: 'email-draft', 
 		title: 'Email Draft', 
 		emoji: '📧', 
-		prompt: 'Convert this speech into a professional email format with proper structure and tone.',
+		prompt: `Convert this speech into a professional email format with proper structure and tone.
+
+Example Raw Speech:
+"Hey Priya, just wanted to see if we could move our 1:1 from Thursday to Friday - no wait actually ask about next Monday instead. Mention that I have a conflict that came up - oh actually say it's a client meeting. And maybe add that I'm happy to adjust based on her availability. End it with thanks and let me know what works for you."
+
+Example Output:
+Hey Priya,
+
+Just wanted to see if we could move our 1:1 from Thursday to next Monday. A client meeting came up on my end. Totally happy to adjust based on your availability.
+
+Thanks, and let me know what works for you.`,
 		isCustom: false
 	},
 	{ 
 		id: 'meeting-notes', 
 		title: 'Meeting Notes', 
 		emoji: '🤝', 
-		prompt: 'Format this as meeting notes with clear action items and key points.',
+		prompt: `Format this as meeting notes with clear action items and key points.
+
+Example Raw Speech:
+"Ok for the marketing campaign we need to um first finalize the budget which Sarah will handle - no wait I think John's taking that now. Then we need social media posts ready by... was it the 15th? Yeah 15th of next month. Oh and don't forget we need to coordinate with the design team for assets - actually make that the brand team specifically."
+
+Example Output:
+Marketing Campaign Notes:
+Key Points:
+- Budget finalization: Owner - John
+- Social media posts deadline: 15th next month
+- Brand team to provide design assets
+
+Action Items:
+1. John to finalize campaign budget
+2. Prepare social posts for 15th deadline
+3. Coordinate with brand team for asset creation`,
 		isCustom: false
 	},
 	{ 
 		id: 'blogging', 
 		title: 'Blogging', 
 		emoji: '✍️', 
-		prompt: 'Format this as a blog post with proper headings and organize ideas for readability.',
+		prompt: `Format this as a blog post with proper headings and organize ideas for readability.
+
+Example Raw Speech:
+"Ok so for this post about productivity tips let's start with time management - no actually let's call it time blocking specifically. Talk about how it helps focus... oh and mention the Pomodoro Technique too. Then we should cover workspace organization, like keeping your desk clean - actually expand that to include digital workspace too. And finally something about taking breaks... yeah regular breaks are super important for maintaining focus."
+
+Example Output:
+# Maximizing Productivity: A Comprehensive Guide
+
+## The Power of Time Blocking
+Time blocking is a game-changer for focus and productivity. The Pomodoro Technique, a popular time-blocking method, helps maintain concentrated work periods while preventing burnout.
+
+## Organizing Your Work Environment
+A clean workspace, both physical and digital, sets the foundation for productive work. Keep your desk organized and maintain a structured digital filing system for optimal efficiency.
+
+## The Importance of Regular Breaks
+Taking strategic breaks throughout the day is crucial for maintaining focus and sustaining long-term productivity.`,
 		isCustom: false
 	}
 ]
