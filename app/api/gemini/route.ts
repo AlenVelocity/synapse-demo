@@ -4,7 +4,7 @@ const MODEL_NAME = process.env.GEMINI_MODEL_NAME || 'gemini-2.0-flash'
 
 export async function POST(request: Request) {
 	try {
-		const { text } = await request.json()
+		const { text, customPrompt } = await request.json()
 
 		if (!text) {
 			return Response.json({ error: 'Text is required' }, { status: 400 })
@@ -33,14 +33,20 @@ export async function POST(request: Request) {
 			{ category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }
 		]
 
-		const prompt = `You are an assistant embedded in a real-time speech-to-text interface. Your task is to revise partial spoken input into a clean, corrected version that reflects the user's most recent intent. The input may contain self-corrections, revisions, or contradictory instructions that the user clarified after a pause or rephrasing.
+		console.log('customPrompt', customPrompt)
+
+		const basePrompt = `You are an assistant embedded in a real-time speech-to-text interface. Your task is to revise partial spoken input into a clean, corrected version that reflects the user's most recent intent. The input may contain self-corrections, revisions, or contradictory instructions that the user clarified after a pause or rephrasing.
 
 Instructions:
 - Interpret the full input as a stream-of-consciousness from a user speaking out loud.
 - Revise the text to reflect only what the user meant to say, removing earlier phrasing that was changed, corrected, or walked back.
 - Maintain the user's original tone and wording when possible.
 - Do not summarize. Simply rewrite the transcript to be natural, complete, and coherent.
-- Output only the revised text with no explanation or formatting.
+- Output only the revised text with no explanation or formatting.`
+
+		const additionalInstructions = customPrompt ? `\n\nAdditional Instructions:\n${customPrompt}` : ''
+
+		const prompt = `${basePrompt}${additionalInstructions}
 
 Input:
 ${text}

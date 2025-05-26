@@ -1,5 +1,4 @@
 import SpeechToTextClient from './_components/SpeechToTextClient'
-import { Github } from 'lucide-react';
 
 export default function SpeechToTextPage() {
 	return (
@@ -11,15 +10,6 @@ export default function SpeechToTextPage() {
 					Press and hold <kbd className="px-2 py-1 bg-gray-100 rounded">Space</kbd> to transcribe
 				</div>
 			</div>
-			<a
-				href="https://github.com/alenvelocity/synapse-demo"
-				target="_blank"
-				rel="noopener noreferrer"
-				className="fixed bottom-4 right-4 p-2 bg-gray-800 text-white rounded-full shadow-lg hover:bg-gray-700 transition-colors"
-				title="View on GitHub"
-			>
-				<Github size={24} />
-			</a>
 		</div>
 	)
 }
