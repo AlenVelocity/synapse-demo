@@ -4,7 +4,7 @@ const MODEL_NAME = process.env.GEMINI_MODEL_NAME || 'gemini-2.0-flash'
 
 export async function POST(request: Request) {
 	try {
-		const { text, customPrompt } = await request.json()
+		const { text, customPrompt, outputMarkdown } = await request.json()
 
 		if (!text) {
 			return Response.json({ error: 'Text is required' }, { status: 400 })
@@ -35,23 +35,36 @@ export async function POST(request: Request) {
 
 		console.log('customPrompt', customPrompt)
 
-		const basePrompt = `You are an assistant embedded in a real-time speech-to-text interface. Your task is to revise partial spoken input into a clean, corrected version that reflects the user's most recent intent. The input may contain self-corrections, revisions, or contradictory instructions that the user clarified after a pause or rephrasing.
+		const markdownInstruction = outputMarkdown 
+			? '\n\nFormat your response using appropriate markdown syntax (headings, lists, bold, italic) to enhance readability and structure.'
+			: '\n\nProvide your response in plain text without any markdown formatting.'
 
-Instructions:
-- Interpret the full input as a stream-of-consciousness from a user speaking out loud.
-- Revise the text to reflect only what the user meant to say, removing earlier phrasing that was changed, corrected, or walked back.
-- Maintain the user's original tone and wording when possible.
-- Do not summarize. Simply rewrite the transcript to be natural, complete, and coherent.
-- Output only the revised text with no explanation or formatting.`
+		const basePrompt = `You are an AI assistant specializing in real-time speech-to-text refinement. Your primary role is to transform raw spoken input into polished, coherent text while preserving the speaker's authentic voice and intended message.
 
-		const additionalInstructions = customPrompt ? `\n\nAdditional Instructions:\n${customPrompt}` : ''
+Core Objectives:
+1. Process the input as natural spoken language, complete with typical speech patterns like self-corrections and revisions
+2. Remove false starts, repetitions, and corrected phrases
+3. Preserve the speaker's original vocabulary, tone, and speaking style
+4. Maintain all meaningful content and context
+5. Deliver a fluid, natural-sounding result
+
+Key Requirements:
+- Focus solely on clarifying and cleaning up the text
+- Keep all substantive content intact
+- Remove only elements that represent speech disfluencies or corrections
+- Preserve the speaker's unique voice and expression style
+- Return only the refined text without explanations or meta-commentary${markdownInstruction}`
+
+		const additionalInstructions = customPrompt 
+			? `\n\nSpecial Instructions:\n${customPrompt}\n\nIMPORTANT: Provide ONLY the revised text in your response. Do not include any explanations, notes, or additional content.` 
+			: ''
 
 		const prompt = `${basePrompt}${additionalInstructions}
 
-Input:
+Input Text:
 ${text}
 
-Output:`
+Revised Version:`
 
 		const result = await model.generateContent({
 			contents: [{ role: 'user', parts: [{ text: prompt }] }],

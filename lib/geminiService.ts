@@ -17,7 +17,7 @@
  * - Do not summarize. Simply rewrite the transcript to be natural, complete, and coherent.
  * - Output only the revised text with no explanation or formatting.
  */
-export const reviseTextWithGemini = async (text: string, customPrompt?: string): Promise<string> => {
+export const reviseTextWithGemini = async (text: string, customPrompt?: string, outputMarkdown?: boolean): Promise<string> => {
 	console.log('Gemini Service: Requesting revision for text:', text)
 
 	try {
@@ -26,7 +26,7 @@ export const reviseTextWithGemini = async (text: string, customPrompt?: string):
 			headers: {
 				'Content-Type': 'application/json'
 			},
-			body: JSON.stringify({ text, customPrompt })
+			body: JSON.stringify({ text, customPrompt, outputMarkdown })
 		})
 
 		if (!response.ok) {

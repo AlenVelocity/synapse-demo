@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, FC, useCallback } from 'react'
 import { Mic, Square, Copy, XCircle, HelpCircle, Settings, ChevronDown, Plus, Trash2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Textarea } from '@/components/ui/textarea'
+import MarkdownEditor, { MarkdownEditorRef } from './MarkdownEditor'
 import { WaveformBar } from './WaveformBar'
 import { LiveTranscriptionEvent, LiveTranscriptionEvents, useDeepgram } from '@/context/DeepgramContextProvider'
 import { MicrophoneEvents, MicrophoneState, useMicrophone } from '@/context/MicrophoneContextProvider'
@@ -75,6 +76,13 @@ const PRESET_MODES: Mode[] = [
 		emoji: '🤝', 
 		prompt: 'Format this as meeting notes with clear action items and key points.',
 		isCustom: false
+	},
+	{ 
+		id: 'blogging', 
+		title: 'Blogging', 
+		emoji: '✍️', 
+		prompt: 'Format this as a blog post with proper headings and organize ideas for readability.',
+		isCustom: false
 	}
 ]
 
@@ -87,6 +95,7 @@ export default function SpeechToTextClient() {
 	const [inputText, setInputText] = useState('')
 	const [caption, setCaption] = useState<string | undefined>('Powered by Deepgram')
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
+	const markdownEditorRef = useRef<MarkdownEditorRef>(null)
 
 	const { connection, connectToDeepgram, connectionState } = useDeepgram()
 	const { setupMicrophone, microphone, startMicrophone, microphoneState, stopMicrophone, cleanupMicrophone } = useMicrophone()
@@ -99,8 +108,10 @@ export default function SpeechToTextClient() {
 	const [selectedMode, setSelectedMode] = useState<string>('none')
 	const [customModes, setCustomModes] = useState<Mode[]>([])
 	const [isHydrated, setIsHydrated] = useState(false)
+	const [aiOutputMarkdown, setAiOutputMarkdown] = useState(false)
 	
 	const intentModePauseTimer = useRef<NodeJS.Timeout | null>(null)
+	const isGeminiProcessing = useRef<boolean>(false)
 	const PAUSE_DURATION_MS = 1000 // Configurable pause duration for intent processing
 
 	// Counts how many times connectToDeepgram effect runs
@@ -122,6 +133,7 @@ export default function SpeechToTextClient() {
 	useEffect(() => {
 		setIsIntentModeEnabled(localStorage.getItem('intentModeEnabled') === 'true')
 		setSelectedMode(localStorage.getItem('selectedMode') || 'none')
+		setAiOutputMarkdown(localStorage.getItem('aiOutputMarkdown') === 'true')
 		
 		const savedCustomModes = localStorage.getItem('customModes')
 		if (savedCustomModes) {
@@ -163,9 +175,10 @@ export default function SpeechToTextClient() {
 	}, [isHydrated])
 
 	const handleCopy = useCallback(async () => {
-		if (textareaRef.current?.value) {
+		const textToCopy = markdownEditorRef.current?.getMarkdown() || inputText
+		if (textToCopy) {
 			try {
-				await navigator.clipboard.writeText(textareaRef.current.value)
+				await navigator.clipboard.writeText(textToCopy)
 				console.log('Text copied to clipboard!')
 				setShowCopiedTooltip(true)
 				setTimeout(() => setShowCopiedTooltip(false), 1500)
@@ -174,15 +187,15 @@ export default function SpeechToTextClient() {
 				alert('Failed to copy text.')
 			}
 		}
-	}, [textareaRef])
+	}, [inputText])
 
 	const handleClear = useCallback(() => {
 		setInputText('')
-		if (textareaRef.current) {
-			textareaRef.current.focus()
+		if (markdownEditorRef.current) {
+			markdownEditorRef.current.focus()
 		}
 		console.log('Text cleared!')
-	}, [setInputText, textareaRef])
+	}, [setInputText])
 
 	// Remove automatic microphone setup on component mount
 	// Microphone will be set up when user first tries to start recording
@@ -232,16 +245,23 @@ export default function SpeechToTextClient() {
 	const handleIntentProcessing = useCallback(async () => {
 		console.log('🎯 handleIntentProcessing called!', { 
 			isIntentModeEnabled, 
-			hasTextarea: !!textareaRef.current,
-			textValue: textareaRef.current?.value 
+			hasEditor: !!markdownEditorRef.current,
+			textValue: inputText,
+			isProcessing: isGeminiProcessing.current
 		})
 		
-		if (!isIntentModeEnabled || !textareaRef.current) {
-			console.log('🎯 Early return - Intent mode disabled or no textarea')
+		if (!isIntentModeEnabled || !markdownEditorRef.current) {
+			console.log('🎯 Early return - Intent mode disabled or no editor')
 			return
 		}
 
-		const currentTextInBox = textareaRef.current.value
+		// Prevent concurrent Gemini calls
+		if (isGeminiProcessing.current) {
+			console.log('🎯 Gemini is already processing, skipping this call')
+			return
+		}
+
+		const currentTextInBox = inputText
 		if (currentTextInBox && currentTextInBox.trim()) {
 			console.log('🎯 Intent Mode: Pause detected. Text for Gemini revision:', currentTextInBox)
 			
@@ -250,28 +270,45 @@ export default function SpeechToTextClient() {
 			console.log('🎯 Using mode prompt:', modePrompt)
 			
 			try {
-				const revisedText = await reviseTextWithGemini(currentTextInBox, modePrompt)
+				isGeminiProcessing.current = true
+				const revisedText = await reviseTextWithGemini(currentTextInBox, modePrompt, aiOutputMarkdown)
 				console.log('🎯 Gemini response received:', revisedText)
 
-				// Only update if Gemini made a change AND the text in the box hasn't changed
-				// (i.e., user didn't start speaking again while Gemini was processing)
-				if (textareaRef.current?.value === currentTextInBox) {
-					if (revisedText !== currentTextInBox) {
-						setInputText(revisedText)
-						console.log('🎯 Intent Mode: InputText updated by Gemini:', revisedText)
-					} else {
-						console.log('🎯 Gemini returned same text, no update needed')
+				// Check if new text was added while Gemini was processing
+				setInputText((currentInputText) => {
+					// If the text hasn't changed since we started processing, replace it with Gemini's revision
+					if (currentInputText === currentTextInBox) {
+						if (revisedText !== currentTextInBox) {
+							console.log('🎯 Intent Mode: InputText updated by Gemini:', revisedText)
+							return revisedText
+						} else {
+							console.log('🎯 Gemini returned same text, no update needed')
+							return currentInputText
+						}
+					} 
+					// If new text was added during processing, preserve the new content
+					else if (currentInputText.startsWith(currentTextInBox)) {
+						// New text was appended - replace the original part with Gemini's revision and keep the new part
+						const newTextPortion = currentInputText.slice(currentTextInBox.length)
+						const combinedText = revisedText + newTextPortion
+						console.log('🎯 Intent Mode: Preserving new transcript while applying Gemini revision:', combinedText)
+						return combinedText
+					} 
+					// If the text changed in an unexpected way, don't apply Gemini's revision
+					else {
+						console.log('🎯 Intent Mode: Gemini revision skipped as text input changed unexpectedly during processing.')
+						return currentInputText
 					}
-				} else {
-					console.log('🎯 Intent Mode: Gemini revision skipped as text input changed during processing.')
-				}
+				})
 			} catch (error) {
 				console.error('🎯 Error calling Gemini:', error)
+			} finally {
+				isGeminiProcessing.current = false
 			}
 		} else {
 			console.log('🎯 No text to process')
 		}
-	}, [isIntentModeEnabled, textareaRef, setInputText, getCurrentModePrompt])
+	}, [isIntentModeEnabled, inputText, getCurrentModePrompt, aiOutputMarkdown])
 
 	const onTranscript = useCallback(
 		(data: LiveTranscriptionEvent) => {
@@ -446,12 +483,16 @@ export default function SpeechToTextClient() {
 			if (intentModePauseTimer.current) {
 				clearTimeout(intentModePauseTimer.current)
 			}
+			// Reset Gemini processing flag when stopping
+			isGeminiProcessing.current = false
 		}
 	}, [microphoneState, stopMicrophone, intentModePauseTimer])
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
-			if (e.code === 'Space' && !isListening && !e.repeat && document.activeElement !== textareaRef.current) {
+			// Check if the active element is within the markdown editor
+			const isInEditor = document.activeElement?.closest('.ProseMirror')
+			if (e.code === 'Space' && !isListening && !e.repeat && !isInEditor) {
 				e.preventDefault()
 				startListening()
 			}
@@ -575,13 +616,13 @@ export default function SpeechToTextClient() {
 					)}
 				</div>
 
-				<div className="relative w-full">
-					<Textarea
-						ref={textareaRef}
+				<div className="relative w-full border rounded-md">
+					<MarkdownEditor
+						ref={markdownEditorRef}
 						value={inputText}
-						onChange={(e) => setInputText(e.target.value)}
+						onChange={setInputText}
 						placeholder="Your text will appear here..."
-						className="min-h-[200px] max-h-[50vh] p-4 text-lg pr-16 overflow-y-auto"
+						className="min-h-[200px] max-h-[50vh] p-4 text-lg pr-16 overflow-y-auto border-0 focus:ring-0"
 					/>
 					<div className="absolute top-2 right-2 flex space-x-2">
 						{inputText && (
@@ -684,6 +725,9 @@ export default function SpeechToTextClient() {
 							isMicrophoneBusy={isMicrophoneBusy}
 							customModes={customModes}
 							saveCustomModes={saveCustomModes}
+							aiOutputMarkdown={aiOutputMarkdown}
+							setAiOutputMarkdown={setAiOutputMarkdown}
+							isHydrated={isHydrated}
 						/>
 					</DialogContent>
 				</Dialog>
@@ -705,6 +749,9 @@ export default function SpeechToTextClient() {
 								isMicrophoneBusy={isMicrophoneBusy}
 								customModes={customModes}
 								saveCustomModes={saveCustomModes}
+								aiOutputMarkdown={aiOutputMarkdown}
+								setAiOutputMarkdown={setAiOutputMarkdown}
+								isHydrated={isHydrated}
 							/>
 						</div>
 						<DrawerFooter>
@@ -763,6 +810,9 @@ interface SettingsContentProps {
 	isMicrophoneBusy: boolean
 	customModes: Mode[]
 	saveCustomModes: (modes: Mode[]) => void
+	aiOutputMarkdown: boolean
+	setAiOutputMarkdown: (enabled: boolean) => void
+	isHydrated: boolean
 }
 
 function SettingsContent({ 
@@ -772,7 +822,10 @@ function SettingsContent({
 	setIsIntentModeEnabled, 
 	isMicrophoneBusy,
 	customModes,
-	saveCustomModes
+	saveCustomModes,
+	aiOutputMarkdown,
+	setAiOutputMarkdown,
+	isHydrated
 }: SettingsContentProps) {
 	return (
 		<div className="w-full">
@@ -811,7 +864,12 @@ function SettingsContent({
 						saveCustomModes={saveCustomModes}
 					/>
 				) : (
-					<SettingsTab isMicrophoneBusy={isMicrophoneBusy} />
+					<SettingsTab 
+						isMicrophoneBusy={isMicrophoneBusy}
+						aiOutputMarkdown={aiOutputMarkdown}
+						setAiOutputMarkdown={setAiOutputMarkdown}
+						isHydrated={isHydrated}
+					/>
 				)}
 			</div>
 		</div>
@@ -987,9 +1045,12 @@ function GeneralTab({ isIntentModeEnabled, setIsIntentModeEnabled, isMicrophoneB
 // Settings Tab Component
 interface SettingsTabProps {
 	isMicrophoneBusy: boolean
+	aiOutputMarkdown: boolean
+	setAiOutputMarkdown: (enabled: boolean) => void
+	isHydrated: boolean
 }
 
-function SettingsTab({ isMicrophoneBusy }: SettingsTabProps) {
+function SettingsTab({ isMicrophoneBusy, aiOutputMarkdown, setAiOutputMarkdown, isHydrated }: SettingsTabProps) {
 	const [microphoneGain, setMicrophoneGain] = useState(() => {
 		if (typeof window !== 'undefined') {
 			return parseFloat(localStorage.getItem('microphoneGain') || '1')
@@ -1032,8 +1093,28 @@ function SettingsTab({ isMicrophoneBusy }: SettingsTabProps) {
 		}
 	}
 
+	const saveAiOutputMarkdown = (enabled: boolean) => {
+		setAiOutputMarkdown(enabled)
+		if (isHydrated) {
+			localStorage.setItem('aiOutputMarkdown', enabled.toString())
+		}
+	}
+
 	return (
 		<div className="space-y-6">
+			{/* AI Output Format */}
+			<div className="flex items-center justify-between">
+				<div>
+					<h3 className="text-sm font-medium">AI Output Markdown</h3>
+					<p className="text-xs text-gray-500">Enable AI to output text with markdown formatting</p>
+				</div>
+				<Switch 
+					checked={aiOutputMarkdown} 
+					onCheckedChange={saveAiOutputMarkdown}
+					disabled={isMicrophoneBusy}
+				/>
+			</div>
+
 			{/* Microphone Gain */}
 			<div className="space-y-2">
 				<Label className="text-sm font-medium">Microphone Gain</Label>
