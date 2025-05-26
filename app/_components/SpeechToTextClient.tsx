@@ -35,7 +35,7 @@ export default function SpeechToTextClient() {
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 
 	const { connection, connectToDeepgram, connectionState } = useDeepgram()
-	const { setupMicrophone, microphone, startMicrophone, microphoneState, stopMicrophone } = useMicrophone()
+	const { setupMicrophone, microphone, startMicrophone, microphoneState, stopMicrophone, cleanupMicrophone } = useMicrophone()
 
 	const captionTimeout = useRef<NodeJS.Timeout | null>(null)
 	const keepAliveInterval = useRef<NodeJS.Timeout | null>(null)
@@ -79,9 +79,8 @@ export default function SpeechToTextClient() {
 		console.log('Text cleared!')
 	}, [setInputText, textareaRef])
 
-	useEffect(() => {
-		setupMicrophone()
-	}, [])
+	// Remove automatic microphone setup on component mount
+	// Microphone will be set up when user first tries to start recording
 
 	// Monitor microphone state and show toast when ready
 	useEffect(() => {
@@ -285,11 +284,23 @@ export default function SpeechToTextClient() {
 
 	const isListening = microphoneState === MicrophoneState.Open
 
-	const startListening = useCallback(() => {
-		if (microphoneState !== MicrophoneState.Open && microphoneState !== MicrophoneState.Opening) {
+	const startListening = useCallback(async () => {
+		// Set up microphone if it hasn't been set up yet
+		if (microphoneState === MicrophoneState.NotSetup) {
+			try {
+				await setupMicrophone()
+				// Note: We'll connect to Deepgram when microphone state becomes Ready
+			} catch (error) {
+				console.error('Failed to setup microphone:', error)
+				return
+			}
+		}
+		
+		// Start microphone if it's ready and not already open
+		if (microphoneState === MicrophoneState.Ready || microphoneState === MicrophoneState.Paused) {
 			startMicrophone()
 		}
-	}, [microphoneState, startMicrophone])
+	}, [microphoneState, startMicrophone, setupMicrophone])
 
 	const stopListening = useCallback(() => {
 		if (microphoneState === MicrophoneState.Open) {

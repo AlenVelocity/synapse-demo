@@ -6,7 +6,8 @@ interface MicrophoneContextType {
 	microphone: MediaRecorder | null
 	startMicrophone: () => void
 	stopMicrophone: () => void
-	setupMicrophone: () => void
+	setupMicrophone: () => Promise<void>
+	cleanupMicrophone: () => void
 	microphoneState: MicrophoneState | null
 }
 
@@ -39,6 +40,7 @@ interface MicrophoneContextProviderProps {
 const MicrophoneContextProvider: React.FC<MicrophoneContextProviderProps> = ({ children }) => {
 	const [microphoneState, setMicrophoneState] = useState<MicrophoneState>(MicrophoneState.NotSetup)
 	const [microphone, setMicrophone] = useState<MediaRecorder | null>(null)
+	const [mediaStream, setMediaStream] = useState<MediaStream | null>(null)
 
 	const setupMicrophone = async () => {
 		setMicrophoneState(MicrophoneState.SettingUp)
@@ -55,12 +57,27 @@ const MicrophoneContextProvider: React.FC<MicrophoneContextProviderProps> = ({ c
 
 			setMicrophoneState(MicrophoneState.Ready)
 			setMicrophone(microphone)
+			setMediaStream(userMedia)
 		} catch (err: any) {
 			console.error(err)
-
+			setMicrophoneState(MicrophoneState.Error)
 			throw err
 		}
 	}
+
+	const cleanupMicrophone = useCallback(() => {
+		if (microphone?.state === 'recording') {
+			microphone.stop()
+		}
+		
+		if (mediaStream) {
+			mediaStream.getTracks().forEach(track => track.stop())
+			setMediaStream(null)
+		}
+		
+		setMicrophone(null)
+		setMicrophoneState(MicrophoneState.NotSetup)
+	}, [microphone, mediaStream])
 
 	const stopMicrophone = useCallback(() => {
 		setMicrophoneState(MicrophoneState.Pausing)
@@ -90,6 +107,7 @@ const MicrophoneContextProvider: React.FC<MicrophoneContextProviderProps> = ({ c
 				startMicrophone,
 				stopMicrophone,
 				setupMicrophone,
+				cleanupMicrophone,
 				microphoneState
 			}}
 		>
